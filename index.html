@@ -61,6 +61,16 @@ body.birthday-mode .countdown-card{border-color:#79559d;box-shadow:0 22px 85px #
 .locked-note[hidden]{display:none}
 body.birthday-mode .special-message-btn{margin-top:22px}
 
+
+/* Controlos da melodia instrumental */
+.music-player{max-width:430px;margin:18px auto 0;padding:14px 16px;border:1px solid #59447f;border-radius:16px;background:linear-gradient(135deg,#17132c,#0d0b1b);display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap}
+.music-player button{border:1px solid #765ca9;background:#24183c;color:#f8eaff;border-radius:999px;padding:10px 16px;font:600 13px 'DM Sans',sans-serif;cursor:pointer}
+.music-player button:focus-visible,.music-player input:focus-visible{outline:2px solid var(--cyan);outline-offset:3px}
+.music-player .music-note{font-size:20px;color:#f5d6a0}
+.music-player label{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:7px}
+.music-player input{width:90px;accent-color:#c084fc}
+#musicStatus{width:100%;font-size:11px;color:#aaa3c2;text-align:center}
+
 </style>
 </head>
 <body>
@@ -94,6 +104,13 @@ body.birthday-mode .special-message-btn{margin-top:22px}
       <p id="countLabel" class="count-label">As surpresas estão à tua espera...</p>
       <div class="date">28 NOVEMBRO 2026</div>
       <button type="button" class="btn primary special-message-btn" id="specialMessageButton">VER MENSAGEM ESPECIAL 💌</button>
+
+      <div class="music-player" aria-label="Controlos da música instrumental">
+        <span class="music-note" aria-hidden="true">♫</span>
+        <button type="button" id="musicToggle" aria-pressed="false">▶ Ouvir Parabéns</button>
+        <label for="musicVolume">Volume <input id="musicVolume" type="range" min="0" max="100" value="55"></label>
+        <div id="musicStatus" aria-live="polite">Melodia instrumental original · toque para ouvir</div>
+      </div>
       <div class="locked-note" id="lockedMessage" role="status" aria-live="polite" hidden>
         🔒 Esta mensagem especial está reservada para ti. Estará disponível no dia do teu aniversário! ❤️
       </div>
@@ -192,41 +209,61 @@ if(Date.now()>=birthdayInstant) activateBirthdayMode();
 else updateCountdown();
 setInterval(updateCountdown,1000);
 
-const specialMessageButton = $('specialMessageButton');
-const lockedMessage = $('lockedMessage');
-if(specialMessageButton){
-  specialMessageButton.addEventListener('click',()=>{
-    if(Date.now() < birthdayInstant){
-      if(lockedMessage){
-        lockedMessage.hidden=false;
-        lockedMessage.scrollIntoView({behavior:'smooth',block:'nearest'});
-      }
+
+// Melodia instrumental original, sintetizada no navegador (não precisa de ficheiro MP3).
+// O navegador só inicia o som depois de um toque do utilizador.
+const musicToggle = $('musicToggle');
+const musicVolume = $('musicVolume');
+const musicStatus = $('musicStatus');
+let audioContext = null;
+let masterGain = null;
+let musicTimer = null;
+let musicStep = 0;
+let musicPlaying = false;
+const melody = [
+  [659.25, 0], [659.25, 0], [739.99, 0], [659.25, 0], [880.00, 0], [830.61, 0],
+  [659.25, 0], [659.25, 0], [739.99, 0], [659.25, 0], [987.77, 0], [880.00, 0],
+  [659.25, 0], [659.25, 0], [1318.51, 0], [1108.73, 0], [880.00, 0], [830.61, 0], [739.99, 0],
+  [1174.66, 0], [1174.66, 0], [1108.73, 0], [880.00, 0], [987.77, 0], [880.00, 0]
+];
+function playNote(frequency, startTime){
+  if(!audioContext || !masterGain || masterGain.gain.value <= 0) return;
+  const osc=audioContext.createOscillator();
+  const noteGain=audioContext.createGain();
+  osc.type='sine';
+  osc.frequency.setValueAtTime(frequency,startTime);
+  noteGain.gain.setValueAtTime(0.0001,startTime);
+  noteGain.gain.exponentialRampToValueAtTime(0.16,startTime+0.025);
+  noteGain.gain.exponentialRampToValueAtTime(0.0001,startTime+0.48);
+  osc.connect(noteGain);
+  noteGain.connect(masterGain);
+  osc.start(startTime);
+  osc.stop(startTime+0.5);
+  // Harmónico suave para dar um timbre brilhante de piano/sino.
+  const overtone=audioContext.createOscillator();
+  const overtoneGain=audioContext.createGain();
+  overtone.type='triangle';
+  overtone.frequency.setValueAtTime(frequency*2,startTime);
+  overtoneGain.gain.setValueAtTime(0.0001,startTime);
+  overtoneGain.gain.exponentialRampToValueAtTime(0.035,startTime+0.02);
+  overtoneGain.gain.exponentialRampToValueAtTime(0.0001,startTime+0.28);
+  overtone.connect(overtoneGain);
+  overtoneGain.connect(masterGain);
+  overtone.start(startTime);
+  overtone.stop(startTime+0.3);
+}
+function scheduleMelody(){
+  if(!musicPlaying || !audioContext) return;
+  const note=melody[musicStep % melody.length][0];
+  playNote(note,audioContext.currentTime+0.03);
+  musicStep++;
+}
+async function startBirthdayMusic(){
+  try{
+    const AudioContextClass=window.AudioContext || window.webkitAudioContext;
+    if(!AudioContextClass){
+      if(musicStatus) musicStatus.textContent='Este navegador não suporta reprodução de áudio.';
       return;
     }
-    activateBirthdayMode();
-    const messageSection=$('mensagem');
-    if(messageSection){
-      messageSection.hidden=false;
-      messageSection.scrollIntoView({behavior:'smooth',block:'start'});
-    }
-  });
-}
-
-// Optional photo replacement remains available.
-const photoInput=$('photoInput');
-if(photoInput){
-  photoInput.addEventListener('change',event=>{
-    const file=event.target.files && event.target.files[0];
-    if(!file || !file.type.startsWith('image/')) return;
-    const reader=new FileReader();
-    reader.onload=()=>{
-      $('portraitImage').src=reader.result;
-      $('portraitImage').style.display='block';
-      $('photoPlaceholder').classList.add('hidden');
-    };
-    reader.readAsDataURL(file);
-  });
-}
-</script>
-</body>
-</html>
+    if(!audioContext){
+      audioContext=new AudioConte
